@@ -13,38 +13,28 @@
  */
 package lu.nowina.nexu.rest;
 
-import static org.apache.commons.lang.StringUtils.isNotBlank;
-
-import java.util.Collections;
-import java.util.List;
-
-import javax.xml.bind.DatatypeConverter;
-
+import eu.europa.esig.dss.DigestAlgorithm;
+import eu.europa.esig.dss.SignatureValue;
+import eu.europa.esig.dss.ToBeSigned;
+import eu.europa.esig.dss.token.DSSPrivateKeyEntry;
+import eu.europa.esig.dss.token.SignatureTokenConnection;
+import lu.nowina.nexu.CancelledOperationException;
+import lu.nowina.nexu.api.*;
+import lu.nowina.nexu.api.flow.BasicOperationStatus;
+import lu.nowina.nexu.api.flow.OperationResult;
+import lu.nowina.nexu.api.plugin.*;
+import lu.nowina.nexu.flow.operation.CoreOperationStatus;
+import lu.nowina.nexu.flow.operation.TokenOperationResultKey;
+import lu.nowina.nexu.json.GsonHelper;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import eu.europa.esig.dss.DigestAlgorithm;
-import eu.europa.esig.dss.ToBeSigned;
-import lu.nowina.nexu.api.AuthenticateRequest;
-import lu.nowina.nexu.api.CertificateFilter;
-import lu.nowina.nexu.api.Execution;
-import lu.nowina.nexu.api.Feedback;
-import lu.nowina.nexu.api.FeedbackStatus;
-import lu.nowina.nexu.api.GetCertificateRequest;
-import lu.nowina.nexu.api.GetIdentityInfoRequest;
-import lu.nowina.nexu.api.NexuAPI;
-import lu.nowina.nexu.api.NexuRequest;
-import lu.nowina.nexu.api.Purpose;
-import lu.nowina.nexu.api.SignatureRequest;
-import lu.nowina.nexu.api.TokenId;
-import lu.nowina.nexu.api.plugin.HttpPlugin;
-import lu.nowina.nexu.api.plugin.HttpRequest;
-import lu.nowina.nexu.api.plugin.HttpResponse;
-import lu.nowina.nexu.api.plugin.HttpStatus;
-import lu.nowina.nexu.api.plugin.InitializationMessage;
-import lu.nowina.nexu.json.GsonHelper;
+import javax.xml.bind.DatatypeConverter;
+import java.util.*;
+
+import static org.apache.commons.lang.StringUtils.isNotBlank;
 
 /**
  * Default implementation of HttpPlugin for NexU.
@@ -87,7 +77,7 @@ public class RestHttpPlugin implements HttpPlugin {
 		return null;
 	}
 	
-	private HttpResponse signRequest(NexuAPI api, HttpRequest req, String payload) {
+	private HttpResponse signRequest(NexuAPI api, HttpRequest req, String payload) throws Exception {
 		logger.info("Signature");
 		final SignatureRequest r;
 		if (StringUtils.isEmpty(payload)) {
@@ -126,6 +116,68 @@ public class RestHttpPlugin implements HttpPlugin {
 			return invalidRequestHttpResponse;
 		} else {
 			logger.info("Call API");
+			CertificateResponseCache cache = CertificateResponseCache.getInstance();
+			if (cache.getCertificateResponse() != null){
+				TokenId tkId = cache.getCertificateResponse().getTokenId();
+				final Map<TokenOperationResultKey, Object> map1 = new HashMap<TokenOperationResultKey, Object>();
+				map1.put(TokenOperationResultKey.ADVANCED_CREATION, false);
+				map1.put(TokenOperationResultKey.TOKEN_ID, tkId);
+				final OperationResult<Map<TokenOperationResultKey, Object>> getTokenOperationResult =
+						new OperationResult<Map<TokenOperationResultKey, Object>>(map1);
+				SignatureTokenConnection token = null;
+				if (getTokenOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+					final Map<TokenOperationResultKey, Object> map = getTokenOperationResult.getResult();
+					final TokenId tokenId = (TokenId) map.get(TokenOperationResultKey.TOKEN_ID);
+
+					final SignatureTokenConnection signatureToken = api.getTokenConnection(tkId);
+					final OperationResult<SignatureTokenConnection> getTokenConnectionOperationResult = new OperationResult<SignatureTokenConnection>(signatureToken);
+					if (getTokenConnectionOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+						token = getTokenConnectionOperationResult.getResult();
+						logger.info("Token " + token);
+
+						final Product product = (Product) map.get(TokenOperationResultKey.SELECTED_PRODUCT);
+						final ProductAdapter productAdapter = (ProductAdapter) map.get(TokenOperationResultKey.SELECTED_PRODUCT_ADAPTER);
+						final OperationResult<DSSPrivateKeyEntry> selectPrivateKeyOperationResult =
+								DssPrivate(token, api, product, productAdapter, null, cache.getCertificateResponse().getKeyId());
+						if (selectPrivateKeyOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+							final DSSPrivateKeyEntry key = selectPrivateKeyOperationResult.getResult();
+
+							logger.info("Key " + key + " " + key.getCertificate().getCertificate().getSubjectDN() + " from " + key.getCertificate().getCertificate().getIssuerDN());
+							final OperationResult<SignatureValue> signOperationResult = new OperationResult<SignatureValue>(token.sign(r.getToBeSigned(), r.getDigestAlgorithm(), key));
+							if(signOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+								final SignatureValue value = signOperationResult.getResult();
+//
+								Execution<SignatureResponse> signatureResponseExecution = new Execution<SignatureResponse>(new SignatureResponse(value, key.getCertificate(), key.getCertificateChain()));
+								return toHttpResponse(signatureResponseExecution);
+							} else {
+								if(signOperationResult.getStatus().equals(BasicOperationStatus.EXCEPTION)) {
+									throw signOperationResult.getException();
+								} else {
+									return toHttpResponse(new Execution<>(signOperationResult.getStatus()));
+								}
+							}
+						} else {
+							if(selectPrivateKeyOperationResult.getStatus().equals(BasicOperationStatus.EXCEPTION)) {
+								throw selectPrivateKeyOperationResult.getException();
+							} else {
+								return toHttpResponse(new Execution<>(selectPrivateKeyOperationResult.getStatus()));
+							}
+						}
+					} else {
+						if(getTokenConnectionOperationResult.getStatus().equals(BasicOperationStatus.EXCEPTION)) {
+							throw getTokenConnectionOperationResult.getException();
+						} else {
+							return toHttpResponse(new Execution<>(getTokenConnectionOperationResult.getStatus()));
+						}
+					}
+				} else {
+					if(getTokenOperationResult.getStatus().equals(BasicOperationStatus.EXCEPTION)) {
+						throw getTokenOperationResult.getException();
+					} else {
+						return toHttpResponse(new Execution<>(getTokenOperationResult.getStatus()));
+					}
+				}
+			}
 			final Execution<?> respObj = api.sign(r);
 			return toHttpResponse(respObj);
 		}
@@ -152,15 +204,25 @@ public class RestHttpPlugin implements HttpPlugin {
 					r.setCertificateFilter(certificateFilter);
 				}
 			}
-			
+
+			checkSaveCertificate(req, r);
 		} else {
 			r = GsonHelper.fromJson(payload, GetCertificateRequest.class);
+			checkSaveCertificate(req, r);
 		}
 
 		final HttpResponse invalidRequestHttpResponse = checkRequestValidity(api, r);
 		if(invalidRequestHttpResponse != null) {
 			return invalidRequestHttpResponse;
 		} else {
+			CertificateResponseCache cache = CertificateResponseCache.getInstance();
+			if (cache.getCertificateResponse() != null){
+				CustomCertificateResponse customCertificateResponse = new CustomCertificateResponse(true, cache.getCertificateResponse());
+				if (r.isDeleteCache()){
+					deleteCache();
+				}
+				return new HttpResponse(GsonHelper.toJson(customCertificateResponse), "application/json;charset=UTF-8", HttpStatus.OK);
+			}
 			logger.info("Call API");
 			final Execution<?> respObj = api.getCertificate(r);
 			return toHttpResponse(respObj);
@@ -237,6 +299,72 @@ public class RestHttpPlugin implements HttpPlugin {
 			return new HttpResponse(GsonHelper.toJson(respObj), "application/json;charset=UTF-8", HttpStatus.OK);
 		} else {
 			return new HttpResponse(GsonHelper.toJson(respObj), "application/json;charset=UTF-8", HttpStatus.ERROR);
+		}
+	}
+
+
+	private OperationResult<DSSPrivateKeyEntry> DssPrivate(SignatureTokenConnection token, NexuAPI api, Product product, ProductAdapter productAdapter, CertificateFilter certificateFilter,  String keyFilter) {
+		final List<DSSPrivateKeyEntry> keys;
+
+		try {
+			if((productAdapter != null) && (product != null) && productAdapter.supportCertificateFilter(product) && (certificateFilter != null)) {
+				keys = productAdapter.getKeys(token, certificateFilter);
+			} else {
+				keys = token.getKeys();
+			}
+		} catch(final CancelledOperationException e) {
+			return new OperationResult<DSSPrivateKeyEntry>(BasicOperationStatus.USER_CANCEL);
+		}
+
+		DSSPrivateKeyEntry key = null;
+
+		final Iterator<DSSPrivateKeyEntry> it = keys.iterator();
+		while (it.hasNext()) {
+			final DSSPrivateKeyEntry e = it.next();
+			if ("CN=Token Signing Public Key".equals(e.getCertificate().getCertificate().getIssuerDN().getName())) {
+				it.remove();
+			}
+		}
+
+		if (keys.isEmpty()) {
+			return new OperationResult<DSSPrivateKeyEntry>(CoreOperationStatus.NO_KEY);
+		} else if (keys.size() == 1) {
+			key = keys.get(0);
+			if((keyFilter != null) && !key.getCertificate().getDSSIdAsString().equals(keyFilter)) {
+				return new OperationResult<DSSPrivateKeyEntry>(CoreOperationStatus.CANNOT_SELECT_KEY);
+			} else {
+				return new OperationResult<DSSPrivateKeyEntry>(key);
+			}
+		} else {
+			if (keyFilter != null) {
+				for (final DSSPrivateKeyEntry k : keys) {
+					if (k.getCertificate().getDSSIdAsString().equals(keyFilter)) {
+						key = k;
+						break;
+					}
+				}
+				if(key == null) {
+					return new OperationResult<DSSPrivateKeyEntry>(CoreOperationStatus.CANNOT_SELECT_KEY);
+				}
+			} else {
+				return new OperationResult<DSSPrivateKeyEntry>(CoreOperationStatus.CANNOT_SELECT_KEY);
+			}
+			return new OperationResult<DSSPrivateKeyEntry>(key);
+		}
+	}
+
+	private void deleteCache() {
+		// Cache the values as strings
+		CertificateResponseCache cache = CertificateResponseCache.getInstance();
+		cache.setCertificateResponse(null);
+	}
+
+	private void checkSaveCertificate(HttpRequest req, GetCertificateRequest r){
+		if(req.getParameter("deleteCache") != null && req.getParameter("deleteCache").equals("true")){
+			r.setSaveCertificate(false);
+			r.setDeleteCache(true);
+		} else if (req.getParameter("saveCertificate") != null && req.getParameter("saveCertificate").equals("true")){
+			r.setSaveCertificate(true);
 		}
 	}
 }

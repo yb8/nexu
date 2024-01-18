@@ -16,6 +16,8 @@ package lu.nowina.nexu.view.ui;
 import java.net.URL;
 import java.util.ResourceBundle;
 
+import javafx.scene.control.CheckBox;
+import lu.nowina.nexu.api.CertificateResponseCache;
 import org.apache.commons.lang.StringUtils;
 
 import javafx.event.ActionEvent;
@@ -42,9 +44,16 @@ public class PasswordInputController extends AbstractUIOperationController<char[
 	@FXML
 	private PasswordField password;
 
+//	@FXML
+//	private CheckBox savePassword;
+
 	@Override
 	public void initialize(URL location, ResourceBundle resources) {
-		EventHandler<ActionEvent> handler = event -> signalEnd(password.getText().toCharArray());
+		EventHandler<ActionEvent> handler = event -> {
+			CertificateResponseCache cache = CertificateResponseCache.getInstance();
+//			cache.setRememberPassword(savePassword.isSelected());
+			signalEnd(password.getText().toCharArray());
+		};
 		ok.setOnAction(handler);
 		password.setOnAction(handler);
 		cancel.setOnAction(e -> signalUserCancel());
@@ -58,4 +67,8 @@ public class PasswordInputController extends AbstractUIOperationController<char[
 			this.passwordPrompt.setText(passwordPrompt);
 		}
 	}
+
+//	public boolean isSavePasswordSelected() {
+//		return savePassword.isSelected();
+//	}
 }

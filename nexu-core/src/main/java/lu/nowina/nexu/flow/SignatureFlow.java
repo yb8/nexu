@@ -13,8 +13,10 @@
  */
 package lu.nowina.nexu.flow;
 
+import java.util.List;
 import java.util.Map;
 
+import lu.nowina.nexu.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,13 +24,6 @@ import eu.europa.esig.dss.SignatureValue;
 import eu.europa.esig.dss.token.DSSPrivateKeyEntry;
 import eu.europa.esig.dss.token.SignatureTokenConnection;
 import lu.nowina.nexu.NexuException;
-import lu.nowina.nexu.api.Execution;
-import lu.nowina.nexu.api.NexuAPI;
-import lu.nowina.nexu.api.Product;
-import lu.nowina.nexu.api.ProductAdapter;
-import lu.nowina.nexu.api.SignatureRequest;
-import lu.nowina.nexu.api.SignatureResponse;
-import lu.nowina.nexu.api.TokenId;
 import lu.nowina.nexu.api.flow.BasicOperationStatus;
 import lu.nowina.nexu.api.flow.OperationResult;
 import lu.nowina.nexu.flow.operation.AdvancedCreationFeedbackOperation;
@@ -59,77 +54,156 @@ class SignatureFlow extends AbstractCoreFlow<SignatureRequest, SignatureResponse
 			throw new NexuException("Digest algorithm expected");
 		}
 
-		SignatureTokenConnection token = null;
-		try {
-			final OperationResult<Map<TokenOperationResultKey, Object>> getTokenOperationResult =
-					getOperationFactory().getOperation(GetTokenOperation.class, api, req.getTokenId()).perform();
-			if (getTokenOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
-				final Map<TokenOperationResultKey, Object> map = getTokenOperationResult.getResult();
-				final TokenId tokenId = (TokenId) map.get(TokenOperationResultKey.TOKEN_ID);
+		CertificateResponseCache cache = CertificateResponseCache.getInstance();
+		if (cache.getCertificateResponse() != null) {
+			SignatureTokenConnection token = null;
+			try {
+				final OperationResult<Map<TokenOperationResultKey, Object>> getTokenOperationResult =
+						getOperationFactory().getOperation(GetTokenOperation.class, api, cache.getCertificateResponse().getTokenId()).perform();
+				if (getTokenOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+					final Map<TokenOperationResultKey, Object> map = getTokenOperationResult.getResult();
+					final TokenId tokenId = (TokenId) map.get(TokenOperationResultKey.TOKEN_ID);
 
-				final OperationResult<SignatureTokenConnection> getTokenConnectionOperationResult =
-						getOperationFactory().getOperation(GetTokenConnectionOperation.class, api, tokenId).perform();
-				if (getTokenConnectionOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
-					token = getTokenConnectionOperationResult.getResult();
-					logger.info("Token " + token);
-					
-					final Product product = (Product) map.get(TokenOperationResultKey.SELECTED_PRODUCT);
-					final ProductAdapter productAdapter = (ProductAdapter) map.get(TokenOperationResultKey.SELECTED_PRODUCT_ADAPTER);
-					final OperationResult<DSSPrivateKeyEntry> selectPrivateKeyOperationResult =
-							getOperationFactory().getOperation(
-									SelectPrivateKeyOperation.class, token, api, product, productAdapter, null, req.getKeyId()).perform();
-					if (selectPrivateKeyOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
-						final DSSPrivateKeyEntry key = selectPrivateKeyOperationResult.getResult();
+					final OperationResult<SignatureTokenConnection> getTokenConnectionOperationResult =
+							getOperationFactory().getOperation(GetTokenConnectionOperation.class, api, tokenId).perform();
+					if (getTokenConnectionOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+						token = getTokenConnectionOperationResult.getResult();
+						logger.info("Token " + token);
 
-						logger.info("Key " + key + " " + key.getCertificate().getCertificate().getSubjectDN() + " from " + key.getCertificate().getCertificate().getIssuerDN());
-						final OperationResult<SignatureValue> signOperationResult = getOperationFactory().getOperation(
-								SignOperation.class, token, req.getToBeSigned(), req.getDigestAlgorithm(), key).perform();
-						if(signOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
-							final SignatureValue value = signOperationResult.getResult();
-							logger.info("Signature performed " + value);
+						final Product product = (Product) map.get(TokenOperationResultKey.SELECTED_PRODUCT);
+						final ProductAdapter productAdapter = (ProductAdapter) map.get(TokenOperationResultKey.SELECTED_PRODUCT_ADAPTER);
+						final OperationResult<DSSPrivateKeyEntry> selectPrivateKeyOperationResult =
+								getOperationFactory().getOperation(
+										SelectPrivateKeyOperation.class, token, api, product, productAdapter, null, cache.getCertificateResponse().getKeyId()).perform();
+						if (selectPrivateKeyOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+							final DSSPrivateKeyEntry key = selectPrivateKeyOperationResult.getResult();
+//							DSSPrivateKeyEntry key =
 
-							if ((Boolean) map.get(TokenOperationResultKey.ADVANCED_CREATION)) {
-								getOperationFactory().getOperation(AdvancedCreationFeedbackOperation.class,
-										api, map).perform();
+							logger.info("Key " + key + " " + key.getCertificate().getCertificate().getSubjectDN() + " from " + key.getCertificate().getCertificate().getIssuerDN());
+							final OperationResult<SignatureValue> signOperationResult = getOperationFactory().getOperation(
+									SignOperation.class, token, req.getToBeSigned(), req.getDigestAlgorithm(), key).perform();
+							if(signOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+								final SignatureValue value = signOperationResult.getResult();
+								logger.info("Signature performed " + value);
+
+								if ((Boolean) map.get(TokenOperationResultKey.ADVANCED_CREATION)) {
+									getOperationFactory().getOperation(AdvancedCreationFeedbackOperation.class,
+											api, map).perform();
+								}
+
+								if(api.getAppConfig().isEnablePopUps() && api.getAppConfig().isEnableInformativePopUps()) {
+									getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
+											"signature.flow.finished", api.getAppConfig().getApplicationName()).perform();
+								}
+
+								return new Execution<SignatureResponse>(new SignatureResponse(value, key.getCertificate(), key.getCertificateChain()));
+							} else {
+								return handleErrorOperationResult(signOperationResult);
 							}
-							
-							if(api.getAppConfig().isEnablePopUps() && api.getAppConfig().isEnableInformativePopUps()) {
-								getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
-									"signature.flow.finished", api.getAppConfig().getApplicationName()).perform();
-							}
-							
-							return new Execution<SignatureResponse>(new SignatureResponse(value, key.getCertificate(), key.getCertificateChain()));
 						} else {
-							return handleErrorOperationResult(signOperationResult);
+							if(api.getAppConfig().isEnablePopUps()) {
+								getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
+										"signature.flow.no.key.selected", api.getAppConfig().getApplicationName()).perform();
+							}
+							return handleErrorOperationResult(selectPrivateKeyOperationResult);
 						}
 					} else {
 						if(api.getAppConfig().isEnablePopUps()) {
 							getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
-								"signature.flow.no.key.selected", api.getAppConfig().getApplicationName()).perform();
+									"signature.flow.bad.token", api.getAppConfig().getApplicationName()).perform();
 						}
-						return handleErrorOperationResult(selectPrivateKeyOperationResult);
+						return handleErrorOperationResult(getTokenConnectionOperationResult);
 					}
 				} else {
-					if(api.getAppConfig().isEnablePopUps()) {
-						getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
-							"signature.flow.bad.token", api.getAppConfig().getApplicationName()).perform();
-					}
-					return handleErrorOperationResult(getTokenConnectionOperationResult);
+					return handleErrorOperationResult(getTokenOperationResult);
 				}
-			} else {
-				return handleErrorOperationResult(getTokenOperationResult);
+			} catch (Exception e) {
+				logger.error("Flow error", e);
+				throw handleException(e);
+			} finally {
+				if(token != null) {
+					try {
+						token.close();
+					} catch(final Exception e) {
+						logger.error("Exception when closing token", e);
+					}
+				}
 			}
-		} catch (Exception e) {
-			logger.error("Flow error", e);
-			throw handleException(e);
-		} finally {
-			if(token != null) {
-				try {
-					token.close();
-				} catch(final Exception e) {
-					logger.error("Exception when closing token", e);
+		} else {
+			SignatureTokenConnection token = null;
+			try {
+				final OperationResult<Map<TokenOperationResultKey, Object>> getTokenOperationResult =
+						getOperationFactory().getOperation(GetTokenOperation.class, api, req.getTokenId()).perform();
+				if (getTokenOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+					final Map<TokenOperationResultKey, Object> map = getTokenOperationResult.getResult();
+					final TokenId tokenId = (TokenId) map.get(TokenOperationResultKey.TOKEN_ID);
+
+					final OperationResult<SignatureTokenConnection> getTokenConnectionOperationResult =
+							getOperationFactory().getOperation(GetTokenConnectionOperation.class, api, tokenId).perform();
+					if (getTokenConnectionOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+						token = getTokenConnectionOperationResult.getResult();
+						logger.info("Token " + token);
+
+						final Product product = (Product) map.get(TokenOperationResultKey.SELECTED_PRODUCT);
+						final ProductAdapter productAdapter = (ProductAdapter) map.get(TokenOperationResultKey.SELECTED_PRODUCT_ADAPTER);
+						final OperationResult<DSSPrivateKeyEntry> selectPrivateKeyOperationResult =
+								getOperationFactory().getOperation(
+										SelectPrivateKeyOperation.class, token, api, product, productAdapter, null, req.getKeyId()).perform();
+						if (selectPrivateKeyOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+							final DSSPrivateKeyEntry key = selectPrivateKeyOperationResult.getResult();
+
+							logger.info("Key " + key + " " + key.getCertificate().getCertificate().getSubjectDN() + " from " + key.getCertificate().getCertificate().getIssuerDN());
+							final OperationResult<SignatureValue> signOperationResult = getOperationFactory().getOperation(
+									SignOperation.class, token, req.getToBeSigned(), req.getDigestAlgorithm(), key).perform();
+							if(signOperationResult.getStatus().equals(BasicOperationStatus.SUCCESS)) {
+								final SignatureValue value = signOperationResult.getResult();
+								logger.info("Signature performed " + value);
+
+								if ((Boolean) map.get(TokenOperationResultKey.ADVANCED_CREATION)) {
+									getOperationFactory().getOperation(AdvancedCreationFeedbackOperation.class,
+											api, map).perform();
+								}
+
+								if(api.getAppConfig().isEnablePopUps() && api.getAppConfig().isEnableInformativePopUps()) {
+									getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
+											"signature.flow.finished", api.getAppConfig().getApplicationName()).perform();
+								}
+
+								return new Execution<SignatureResponse>(new SignatureResponse(value, key.getCertificate(), key.getCertificateChain()));
+							} else {
+								return handleErrorOperationResult(signOperationResult);
+							}
+						} else {
+							if(api.getAppConfig().isEnablePopUps()) {
+								getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
+										"signature.flow.no.key.selected", api.getAppConfig().getApplicationName()).perform();
+							}
+							return handleErrorOperationResult(selectPrivateKeyOperationResult);
+						}
+					} else {
+						if(api.getAppConfig().isEnablePopUps()) {
+							getOperationFactory().getOperation(UIOperation.class, "/fxml/message.fxml",
+									"signature.flow.bad.token", api.getAppConfig().getApplicationName()).perform();
+						}
+						return handleErrorOperationResult(getTokenConnectionOperationResult);
+					}
+				} else {
+					return handleErrorOperationResult(getTokenOperationResult);
+				}
+			} catch (Exception e) {
+				logger.error("Flow error", e);
+				throw handleException(e);
+			} finally {
+				if(token != null) {
+					try {
+						token.close();
+					} catch(final Exception e) {
+						logger.error("Exception when closing token", e);
+					}
 				}
 			}
 		}
+
+
 	}
 }

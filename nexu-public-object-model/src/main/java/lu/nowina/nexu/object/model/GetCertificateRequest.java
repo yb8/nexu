@@ -23,6 +23,8 @@ public class GetCertificateRequest extends NexuRequest {
 	private boolean closeToken;
 	
 	private CertificateFilter certificateFilter;
+	private boolean saveCertificate = false;
+	private boolean deleteCache = false;
 
 	public GetCertificateRequest() {
 		super();
@@ -48,5 +50,9 @@ public class GetCertificateRequest extends NexuRequest {
 	public void setCloseToken(boolean closeToken) {
 		this.closeToken = closeToken;
 	}
+	public boolean isSaveCertificate(){return this.saveCertificate;}
+	public boolean isDeleteCache(){return this.deleteCache;}
+	public void setSaveCertificate(boolean saveCertificate){this.saveCertificate = saveCertificate;}
+	public void setDeleteCache(boolean deleteCache){this.deleteCache = deleteCache;}
 
 }

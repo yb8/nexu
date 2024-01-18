@@ -13,7 +13,10 @@
  */
 package lu.nowina.nexu.generic;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -21,6 +24,11 @@ import javax.smartcardio.Card;
 import javax.smartcardio.CardException;
 import javax.smartcardio.CardTerminal;
 
+import com.sun.org.apache.bcel.internal.generic.IF_ACMPEQ;
+import eu.europa.esig.dss.*;
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Integer;
+import org.bouncycastle.asn1.DERSequence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,11 +37,6 @@ import at.gv.egiz.smcc.CardNotSupportedException;
 import at.gv.egiz.smcc.SignatureCard;
 import at.gv.egiz.smcc.SignatureCardFactory;
 import at.gv.egiz.smcc.TimeoutException;
-import eu.europa.esig.dss.DSSException;
-import eu.europa.esig.dss.DigestAlgorithm;
-import eu.europa.esig.dss.MaskGenerationFunction;
-import eu.europa.esig.dss.SignatureValue;
-import eu.europa.esig.dss.ToBeSigned;
 import eu.europa.esig.dss.token.DSSPrivateKeyEntry;
 import eu.europa.esig.dss.token.SignatureTokenConnection;
 import eu.europa.esig.dss.token.mocca.MOCCASignatureTokenConnection;
@@ -126,9 +129,9 @@ public class MOCCASignatureTokenConnectionAdapter implements SignatureTokenConne
 		}
 	}
 
-	@Deprecated
-	public SignatureValue sign(ToBeSigned toBeSigned, DigestAlgorithm digestAlgorithm, DSSPrivateKeyEntry keyEntry) throws DSSException {
-		return sign(toBeSigned, digestAlgorithm,null, keyEntry);
+	@Override
+	public SignatureValue sign(ToBeSigned toBeSigned, DigestAlgorithm digestAlgorithm, DSSPrivateKeyEntry dssPrivateKeyEntry) throws DSSException {
+		return sign(toBeSigned, digestAlgorithm, null, dssPrivateKeyEntry);
 	}
 
 	@Override
@@ -151,5 +154,25 @@ public class MOCCASignatureTokenConnectionAdapter implements SignatureTokenConne
 			// Rethrow exception as is.
 			throw e;
 		}
+	}
+
+	private static byte[] encode(byte[] signedStream) throws DSSException {
+
+		final int half = signedStream.length / 2;
+		final byte[] firstPart = new byte[half];
+		final byte[] secondPart = new byte[half];
+
+		System.arraycopy(signedStream, 0, firstPart, 0, half);
+		System.arraycopy(signedStream, half, secondPart, 0, half);
+
+		final BigInteger r = new BigInteger(1, firstPart);
+		final BigInteger s = new BigInteger(1, secondPart);
+
+		final ASN1EncodableVector v = new ASN1EncodableVector();
+
+		v.add(new ASN1Integer(r));
+		v.add(new ASN1Integer(s));
+
+		return DSSASN1Utils.getDEREncoded(new DERSequence(v));
 	}
 }

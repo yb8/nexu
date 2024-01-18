@@ -3,7 +3,7 @@
 	<parent>
 		<groupId>lu.nowina.apps</groupId>
 		<artifactId>nexu</artifactId>
-		<version>1.23-SNAPSHOT</version>
+		<version>1.22</version>
 	</parent>
 	<artifactId>nexu-standalone</artifactId>
 
@@ -60,7 +60,44 @@
 			<artifactId>freemarker</artifactId>
 			<version>2.3.22</version>
 		</dependency>
-        <dependency>
+		<!-- https://mvnrepository.com/artifact/com.sun.javafx/mediabox -->
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-base</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-controls</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-graphics </artifactId>
+			<version>15</version>
+			<classifier>win</classifier>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-fxml</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-web</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-media</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
+			<groupId>org.openjfx</groupId>
+			<artifactId>javafx-swing</artifactId>
+			<version>15</version>
+		</dependency>
+		<dependency>
             <groupId>com.dorkbox</groupId>
             <artifactId>SystemTray</artifactId>
             <version>3.0.RC6</version>
